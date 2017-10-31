@@ -1,0 +1,315 @@
+<?php
+
+/**
+* @file
+* Customizations to the Drupal registration system with OTP validation.
+*/
+
+function custom_otp_init() {
+  drupal_add_js(drupal_get_path('module','custom_otp').'/js/otp.js');
+}
+
+function custom_otp_menu() {
+  $items['generateotp'] = array(
+   'page callback' => 'custom_otp_generate_otp',
+    'access callback' => 'user_register_access',
+    'delivery callback' => 'custom_otp_generate_otp_ajax',  
+   'type' => MENU_CALLBACK,
+   );
+
+  return $items;
+}
+
+
+function custom_otp_generate_otp_ajax($page_callback_result) {
+  // Only render content
+  $content = drupal_render($page_callback_result);
+  print $content;
+}
+
+
+function custom_otp_generate_otp($generatedOTP=123) {
+  $generatedOTP = rand(1000,9999);
+  $_SESSION['otp'] = $generatedOTP;
+  $result = (isset($_SESSION['otp']))?"OTP has been sent.".$_SESSION['otp']:"error";
+  if($_SERVER['HTTP_REFERER']) {
+    if(!preg_match("/user\/register$/i", parse_url($_SERVER['HTTP_REFERER'], PHP_URL_PATH))) { 
+      $result = "error";
+    }
+  }else {
+    $result = "error";
+  }
+  echo $result;
+}
+
+function custom_otp_get_otp() {
+  $result = (isset($_SESSION['otp']))?$_SESSION['otp']:'';
+  return $result;
+}
+
+function custom_otp_validate_otp($enteredOTP='') {
+  if(isset($enteredOTP) && ($enteredOTP == custom_otp_get_otp())) {
+    return true;
+  }
+  return false;
+}
+
+
+/**
+* Implements hook_form_FORM_ID_alter().
+*/
+
+function custom_otp_form_alter(&$form, &$form_state, $form_id) {
+  if(($form_id == 'user_register_form') || ($form_id == 'user_profile_form')) {
+    //Hide otp validated
+    $form['field_otp_validated']['#disabled'] = TRUE;
+    $form['field_otp_validated']['#access'] = FALSE;
+  }
+
+  if($form_id == 'user_register_form') {
+    // Make this a multi-step form.
+    if (!empty($form_state['step']) && $form_state['step'] == 2) {
+      custom_otp_register_alter_page_two($form, $form_state);
+    }
+    else {
+      // Otherwise we build page 1.
+      custom_otp_register_alter_page_one($form, $form_state);
+    }
+  }
+}
+
+/**
+* Form alter - Step 1 of user registration.
+*/
+function custom_otp_register_alter_page_one(&$form, &$form_state) {
+
+  // Set the step.
+  $form_state['step'] = 1;
+  
+
+  // Add text for step 1.
+  $form['step'] = array(
+    '#markup' => '<h3>' . t('Step 1 of 2: Account information') . '</h3>',
+    '#weight' => -100,
+  );
+
+  $form['intro'] = array(
+    '#markup' => '<p>' . t('Sign Up for Seken.') . '</p>',
+    '#weight' => -11,
+  );
+
+  // Set default values (so they work with back button).
+
+  //page 1 system reg fields
+  $form['account']['name']['#default_value'] = !empty($form_state['values']['name']) ? $form_state['values']['name'] : '';
+  $form['account']['mail']['#default_value'] = !empty($form_state['values']['mail']) ? $form_state['values']['mail'] : '';
+  $form['account']['mail']['#description'] = t('A valid e-mail address. All notifications from this system will use this address.');
+
+  //page 1 fields
+  $form['field_number']['und'][0]['value']['#default_value'] = !empty($form_state['values']['field_number']['und'][0]['value']) ? $form_state['values']['field_number']['und'][0]['value'] : '';
+
+  //page 2 fields
+  //they are not neccessary here, since they will exist on page two.
+  
+  // Add a next button.
+  $form['actions']['next'] = array(
+    '#type' => 'submit',
+    '#value' => 'Next',
+    '#submit' => array('custom_otp_register_next'),
+  );
+  // Add our own validation handler.
+  //$form['actions']['next']['#validate'] = array('custom_otp_generate_otp');
+
+  // Remove the 'Create new account' button from step 1.
+  unset($form['actions']['submit']);
+}
+
+/**
+* Form alter - Step 2 of user registration.
+*/
+
+function custom_otp_register_alter_page_two(&$form, &$form_state) {
+
+  //drupal_set_message('OTP Set:'.custom_otp_get_otp());
+
+  // Add text for step 2.
+  $form['step'] = array(
+    '#markup' => '<h3>' . t('Step 2 of 2: A 4 digit OTP has been sent to your Number: <b>'.$form_state['values']['field_number']['und'][0]['value']) . '</b></h3>',
+    '#weight' => -10,
+  );
+
+  $form['field_confirm_otp'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Confirm OTP',
+    '#required' => TRUE,
+  );
+  
+  // Add Link
+  
+  $form['otplink'] = array(
+    '#markup' => '<a class="btn" href="#" id="otplinkid" >Resend OTP now</a>' ,
+  );
+  
+  // Add Button
+  /*
+  $form['otpbtton'] = array(
+    '#type' => 'button',
+    '#value' => 'Resend OTP',
+    '#ajax' => array(
+      'callback' => 'custom_otp_generate_otp',
+      'wrapper' => 'resp-otp-id',
+      'method' => 'html',
+      'effect' => 'fade',
+      'event' => 'click',
+    ),
+  );
+  */
+  // Add Response Markup.
+  $form['resp'] = array(
+    '#markup' => '<i><div id="resp-otp-id"></div></i>',
+  );
+
+
+
+  // Hide the fields completed on step 1.
+  $form['account']['name']['#access'] = FALSE;
+  $form['account']['mail']['#access'] = FALSE;
+  $form['account']['pass']['#access'] = FALSE;
+  $form['field_number']['#access'] = FALSE;
+  $form['field_otp_validated']['#access'] = FALSE;
+  /*
+  $form['field_first_name']['#access'] = FALSE;
+  $form['field_last_name']['#access'] = FALSE;
+  $form['field_phone']['#access'] = FALSE;
+
+*/
+  //page 1 system reg fields
+  $form['account']['name']['#default_value'] = !empty($form_state['values']['name']) ? $form_state['values']['name'] : '';
+  $form['account']['mail']['#default_value'] = !empty($form_state['values']['mail']) ? $form_state['values']['mail'] : '';
+  //$form['account']['pass']['#default_value'] = !empty($form_state['values']['pass']) ? $form_state['values']['pass'] : '';
+ //print_r($_POST);
+  if(!empty($POST['storage']['pass1'])) {
+    $form['account']['pass']['#value']['pass1'] = $form_state['storage']['pass1'];
+    $form['account']['pass']['#value']['pass2'] = $form_state['storage']['pass2'];
+  }else{
+    $form_state['storage']['pass1'] = $_POST['pass']['pass1'];
+    $form_state['storage']['pass2'] = $_POST['pass']['pass2']; 
+    $form['account']['pass']['#value']['pass1'] = $form_state['storage']['pass1'];
+    $form['account']['pass']['#value']['pass2'] = $form_state['storage']['pass2'];
+  }
+  $form['account']['mail']['#description'] = t('A valid e-mail address. All notifications from this system will use this address.');
+
+  //page 1 fields
+  $form['field_number']['und'][0]['value']['#default_value'] = !empty($form_state['values']['field_number']['und'][0]['value']) ? $form_state['values']['field_number']['und'][0]['value'] : '';
+
+
+  //page 2 fields
+
+  //for each field on page 2 genrate the default value attribute and pass in the corresponding ['storage'] value if it exists.
+  $fields = array(
+            'field_confirm_otp',
+    );
+
+  foreach($fields as $field){
+    $form[$field]['und']['#default_value'] = !empty($form_state['storage'][$field]) ? $form_state['storage'][$field] : !empty($form_state['values'][$field]['und'][0]['value']) ? $form_state['values'][$field]['und'][0]['value'] : '';
+  }
+
+
+  // Add a back button.
+  $form['actions']['back'] = array(
+    '#type' => 'submit',
+    '#value' => t('Back'),
+    '#submit' => array('custom_otp_register_back'),
+    '#limit_validation_errors' => array(),
+  );
+   // Adjust the submit button to come last.
+  $form['actions']['submit']['#weight'] = 100;
+  // Add our own validation handler.
+  $form['actions']['submit']['#validate'] = array('custom_otp_register_validate');
+  // Replace default submit value.
+  $form['actions']['submit']['#value'] = t('Confirm & SignUp');
+  // Add an additional submit handler to the whole form.
+  $form['#submit'][] = 'custom_otp_register_submit';
+}
+
+/**
+* Validate handler.
+*/
+
+function custom_otp_register_validate(&$form, &$form_state) {
+  $sent_otp = custom_otp_get_otp();
+  $confirm_otp = $form_state['values']['field_confirm_otp'];
+  //drupal_set_message(print_r($form_state['page_values'][1]));
+  //drupal_set_message(print_r($form_state['values']));
+  if ($confirm_otp != $sent_otp) {
+    form_set_error('field_confirm_otp', t('OTP is not matched, Please enter correct OTP!'));
+  }  
+}
+
+/**
+* Submit handler for user registration form.
+*
+* Namespace collision demands underscore.
+*/
+
+function custom_otp_register_submit(&$form, &$form_state) {
+  drupal_set_message($form_state['values']['field_otp_validated']['und'][0]['value']);
+  
+  global $user;
+  db_update('field_data_field_otp_validated')
+    ->fields(array('field_otp_validated' => 'yes'))
+    ->condition('uid', $user->uid)
+    ->execute();
+
+  //$form_state['values']['field_otp_validated']['und'][0]['value'] = 'yes';  
+}
+
+/**
+* Submit handler for next button.
+*
+* Capture the values from page one and store them away so they can be used
+* at final submit time.
+*/
+
+function custom_otp_register_next($form, &$form_state) {
+
+  // Save the page 1 values.
+  $form_state['page_values'][1] = $form_state['values'];
+
+  // Set the step.
+  $form_state['step'] = 2;
+  // Rebuild the form.
+  $form_state['rebuild'] = TRUE;
+  $data = $form_state['values']['field_number'];
+  custom_otp_generate_otp($data);  
+}
+
+
+
+/**
+* Submit handler for back button.
+*
+* Since #limit_validation_errors = array() is set, values from page 2
+* will be discarded.
+*/
+
+function custom_otp_register_back($form, &$form_state) {
+
+  // Save the page 2 values into the ['storage'] nested array.
+  $fields = array(
+            'field_confirm_otp',
+    );
+
+  foreach($fields as $field){
+    $form_state['storage'][$field] = !empty($form[$field]['und']['#value']) ? $form[$field]['und']['#value'] : '';
+  }
+
+  // Load the page 1 values.
+  $form_state['values'] = $form_state['page_values'][1];
+
+  // Set the step.
+  $form_state['step'] = 1;
+  // Rebuild the form.
+  $form_state['rebuild'] = TRUE;
+
+}

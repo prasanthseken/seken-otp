@@ -1,0 +1,5 @@
+name = My Custom Registration
+package = custom
+description = Custom Registration
+core = 7.x
+project = "custom_otp"
